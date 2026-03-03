@@ -1,0 +1,173 @@
+---
+title: "Memory-Mapped File Access"
+description: "Efficient stream-based access to VPK entries using memory-mapped files"
+---
+
+## Overview
+
+Memory-mapped file access allows you to work with VPK entry contents as streams without reading the entire file into memory. This is particularly efficient for large files, as the operating system handles paging and caching automatically.
+
+## GetMemoryMappedStreamIfPossible Method
+
+This method returns a stream for accessing entry contents efficiently:
+
+```csharp
+public Stream GetMemoryMappedStreamIfPossible(PackageEntry entry)
+```
+
+Source: Package.Read.cs:381
+
+### Return Value
+
+Returns one of the following:
+- **`MemoryMappedViewStream`**: For large files (over 4 KiB) with no preload bytes
+- **`MemoryStream`**: For small files (≤ 4 KiB) or entries with preload data
+
+### Parameters
+
+- **entry** (`PackageEntry`): The package entry to access
+
+## When Memory Mapping Is Used
+
+Memory mapping is automatically selected when all of the following conditions are met:
+
+1. **File size > 4096 bytes**: Files larger than 4 KiB benefit from memory mapping
+2. **No preload bytes**: The entry must have `SmallData.Length == 0`
+3. **Valid file stream**: The package was opened via `Read(string)` or with a `FileStream`
+
+```csharp
+if (entry.Length <= 4096 || entry.SmallData.Length > 0)
+{
+    ReadEntry(entry, out var output, false);
+    return new MemoryStream(output);
+}
+```
+
+Source: Package.Read.cs:385-389
+
+<Tip>
+The 4 KiB threshold is chosen because small files are more efficient to read entirely into memory, avoiding the overhead of memory mapping.
+</Tip>
+
+## Limitations with Preload Bytes
+
+VPK entries can have "preload" data (small data stored in the directory file). When an entry contains preload bytes, memory mapping cannot be used because:
+
+- The preload bytes are in the `_dir.vpk` file
+- The main content is in a chunk file (`_000.vpk`, etc.)
+- Memory mapping requires contiguous file access
+
+```csharp
+if (entry.SmallData.Length > 0)
+{
+    // Falls back to reading into MemoryStream
+    ReadEntry(entry, out var output, false);
+    return new MemoryStream(output);
+}
+```
+
+<Note>
+When an entry has preload bytes, `GetMemoryMappedStreamIfPossible` will read the entire entry into a byte array and return a `MemoryStream` instead.
+</Note>
+
+## Stream-Based Access Patterns
+
+### Basic Usage
+
+Use memory-mapped streams to avoid loading entire files into memory:
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+
+using var stream = package.GetMemoryMappedStreamIfPossible(entry);
+```
+
+### Reading Large Files Incrementally
+
+```csharp
+var entry = package.FindEntry("models/large_model.vmdl");
+
+using var stream = package.GetMemoryMappedStreamIfPossible(entry);
+using var reader = new BinaryReader(stream);
+
+// Read file header
+var magic = reader.ReadUInt32();
+var version = reader.ReadUInt32();
+
+// Seek to specific section
+stream.Seek(offset, SeekOrigin.Begin);
+var data = reader.ReadBytes(length);
+```
+
+### Processing Files Without Full Read
+
+```csharp
+var entry = package.FindEntry("textures/large_texture.vtex");
+
+using var stream = package.GetMemoryMappedStreamIfPossible(entry);
+
+// Use the stream with image libraries, parsers, etc.
+var image = Image.Load(stream);
+```
+
+## Memory-Mapped File Caching
+
+The library caches `MemoryMappedFile` objects per archive index to improve performance:
+
+```csharp
+private readonly Dictionary<int, MemoryMappedFile> MemoryMappedPaks = [];
+```
+
+Source: Package.cs:29
+
+- Each chunk file (`pak01_000.vpk`, `pak01_001.vpk`, etc.) is memory-mapped once
+- Subsequent accesses to entries in the same chunk reuse the existing mapping
+- Mappings are disposed when the `Package` is disposed
+
+<Tip>
+Reusing the same `Package` instance for multiple file accesses is more efficient, as memory-mapped files are cached and reused.
+</Tip>
+
+## Non-Split VPK Packages
+
+For packages where data is stored in the directory file itself (`IsDirVPK == false`):
+
+```csharp
+if (entry.ArchiveIndex == 0x7FFF)
+{
+    if (Reader.BaseStream is FileStream fileStream)
+    {
+        path = fileStream.Name;
+    }
+    else
+    {
+        // Fallback to reading into memory
+        ReadEntry(entry, out var output, false);
+        return new MemoryStream(output);
+    }
+}
+```
+
+Source: Package.Read.cs:396-410
+
+<Note>
+If you open a package by passing a `Stream` directly (not using `Read(string)`), memory mapping will fall back to reading into memory for non-split packages.
+</Note>
+
+## Best Practices
+
+<Tip>
+**Use for large files**: Memory mapping is most beneficial for files larger than a few megabytes where reading the entire content would consume significant memory.
+</Tip>
+
+<Tip>
+**Open packages with file paths**: Use `package.Read("path/to/pak01_dir.vpk")` instead of passing a stream directly to enable memory mapping for non-split packages.
+</Tip>
+
+<Tip>
+**Dispose streams properly**: Always use `using` statements or call `Dispose()` on returned streams to free resources promptly.
+</Tip>
+
+<Tip>
+**Combine with binary search**: For applications that look up many large files, combine `OptimizeEntriesForBinarySearch()` with `GetMemoryMappedStreamIfPossible()` for maximum performance.
+</Tip>

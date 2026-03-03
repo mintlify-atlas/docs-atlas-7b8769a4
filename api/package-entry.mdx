@@ -1,0 +1,276 @@
+---
+title: PackageEntry Class
+description: Represents a file entry in a VPK package
+---
+
+## Overview
+
+The `PackageEntry` class represents a single file entry within a VPK package. It contains metadata about the file including its name, location, size, checksum, and archive information.
+
+## Properties
+
+<ResponseField name="FileName" type="string" required>
+  The file name of this entry without the extension.
+  
+  **Note:** This does not contain the file extension (see `TypeName`).
+</ResponseField>
+
+<ResponseField name="DirectoryName" type="string" required>
+  The name of the directory this file is in.
+  
+  - Forward slash (`/`) is always used as a directory separator in Valve's implementation
+  - Directory names are always lower cased in Valve's implementation
+  - Empty string or space (` `) indicates root directory
+</ResponseField>
+
+<ResponseField name="TypeName" type="string" required>
+  The file extension without the dot.
+  
+  If the file has no extension, this is a space character (` `).
+</ResponseField>
+
+<ResponseField name="CRC32" type="uint">
+  The CRC32 checksum of this entry's data.
+</ResponseField>
+
+<ResponseField name="Length" type="uint">
+  The length in bytes of the file data stored in the archive.
+  
+  This does not include `SmallData` preloaded bytes.
+</ResponseField>
+
+<ResponseField name="Offset" type="uint">
+  The offset in bytes where the file data begins in the archive.
+</ResponseField>
+
+<ResponseField name="ArchiveIndex" type="ushort">
+  Which archive file this entry is stored in.
+  
+  - `0x7FFF` (32767) indicates the data is in the `_dir.vpk` file itself
+  - Other values correspond to chunk files (e.g., `0` = `_000.vpk`, `1` = `_001.vpk`)
+</ResponseField>
+
+<ResponseField name="TotalLength" type="uint">
+  The total length in bytes, calculated by adding `Length` and the length of `SmallData`.
+  
+  This is a computed property that represents the complete size of the file.
+</ResponseField>
+
+<ResponseField name="SmallData" type="byte[]">
+  Preloaded bytes that are stored directly in the directory file.
+  
+  Small files (typically < 1 KB) are often stored entirely in `SmallData` for faster access, with `Length` = 0.
+</ResponseField>
+
+## Methods
+
+### GetFileName
+
+Returns the file name with extension.
+
+```csharp
+var entry = package.FindEntry("scripts/game_sounds.txt");
+if (entry != null)
+{
+    var fileName = entry.GetFileName();
+    // Returns: "game_sounds.txt"
+    
+    Console.WriteLine($"File name: {fileName}");
+    Console.WriteLine($"Just name: {entry.FileName}");
+    Console.WriteLine($"Extension: {entry.TypeName}");
+}
+```
+
+### GetFullPath
+
+Returns the absolute path of the file in the package.
+
+```csharp
+var entry = package.FindEntry("scripts/game_sounds.txt");
+if (entry != null)
+{
+    var fullPath = entry.GetFullPath();
+    // Returns: "scripts/game_sounds.txt"
+    
+    Console.WriteLine($"Full path: {fullPath}");
+}
+```
+
+## Usage Examples
+
+### Examining Entry Details
+
+```csharp
+using SteamDatabase.ValvePak;
+
+var package = new Package();
+package.Read("pak01_dir.vpk");
+
+var entry = package.FindEntry("materials/models/props/door.vtf");
+if (entry != null)
+{
+    Console.WriteLine("Entry Information:");
+    Console.WriteLine($"  Full Path: {entry.GetFullPath()}");
+    Console.WriteLine($"  File Name: {entry.GetFileName()}");
+    Console.WriteLine($"  Directory: {entry.DirectoryName}");
+    Console.WriteLine($"  Extension: {entry.TypeName}");
+    Console.WriteLine($"  Total Size: {entry.TotalLength:N0} bytes");
+    Console.WriteLine($"  Archive Data: {entry.Length:N0} bytes");
+    Console.WriteLine($"  Preloaded: {entry.SmallData.Length:N0} bytes");
+    Console.WriteLine($"  CRC32: 0x{entry.CRC32:X8}");
+    Console.WriteLine($"  Archive Index: {entry.ArchiveIndex}");
+    
+    if (entry.ArchiveIndex == 0x7FFF)
+    {
+        Console.WriteLine("  Location: Stored in directory VPK");
+    }
+    else
+    {
+        Console.WriteLine($"  Location: Stored in chunk file _{entry.ArchiveIndex:D3}.vpk");
+    }
+}
+```
+
+### Iterating Through Entries
+
+```csharp
+using SteamDatabase.ValvePak;
+using System.Linq;
+
+var package = new Package();
+package.Read("pak01_dir.vpk");
+
+if (package.Entries != null)
+{
+    // Get all entries across all extensions
+    var allEntries = package.Entries.SelectMany(kvp => kvp.Value);
+    
+    Console.WriteLine($"Total files: {allEntries.Count()}");
+    
+    // Find largest files
+    var largestFiles = allEntries
+        .OrderByDescending(e => e.TotalLength)
+        .Take(10);
+    
+    Console.WriteLine("\nTop 10 largest files:");
+    foreach (var entry in largestFiles)
+    {
+        Console.WriteLine($"  {entry.TotalLength,12:N0} bytes - {entry.GetFullPath()}");
+    }
+    
+    // Group by extension
+    var byExtension = allEntries.GroupBy(e => e.TypeName);
+    Console.WriteLine("\nFiles by extension:");
+    foreach (var group in byExtension.OrderByDescending(g => g.Count()))
+    {
+        var totalSize = group.Sum(e => (long)e.TotalLength);
+        Console.WriteLine($"  .{group.Key,-10} {group.Count(),6} files  {totalSize,15:N0} bytes");
+    }
+}
+```
+
+### Reading Entry Data
+
+```csharp
+using SteamDatabase.ValvePak;
+using System.IO;
+
+var package = new Package();
+package.Read("pak01_dir.vpk");
+
+var entry = package.FindEntry("scripts/config.txt");
+if (entry != null)
+{
+    // Method 1: Let the library allocate the buffer
+    package.ReadEntry(entry, out byte[] data);
+    var text = System.Text.Encoding.UTF8.GetString(data);
+    Console.WriteLine(text);
+    
+    // Method 2: Provide your own buffer
+    var buffer = new byte[entry.TotalLength];
+    package.ReadEntry(entry, buffer, validateCrc: true);
+    
+    // Method 3: Use memory-mapped stream for large files
+    if (entry.TotalLength > 1_000_000)
+    {
+        using var stream = package.GetMemoryMappedStreamIfPossible(entry);
+        // Process stream efficiently
+    }
+}
+```
+
+### Filtering Entries
+
+```csharp
+using SteamDatabase.ValvePak;
+using System.Linq;
+
+var package = new Package();
+package.Read("pak01_dir.vpk");
+
+if (package.Entries != null)
+{
+    // Find all texture files
+    if (package.Entries.TryGetValue("vtf", out var textureEntries))
+    {
+        var materialsTextures = textureEntries
+            .Where(e => e.DirectoryName.StartsWith("materials/"))
+            .ToList();
+        
+        Console.WriteLine($"Found {materialsTextures.Count} textures in materials/");
+    }
+    
+    // Find small files that are preloaded
+    var preloadedFiles = package.Entries
+        .SelectMany(kvp => kvp.Value)
+        .Where(e => e.SmallData.Length > 0 && e.Length == 0)
+        .ToList();
+    
+    Console.WriteLine($"\nFound {preloadedFiles.Count} fully preloaded files");
+    
+    // Find files in a specific directory
+    var scriptsFiles = package.Entries
+        .SelectMany(kvp => kvp.Value)
+        .Where(e => e.DirectoryName == "scripts")
+        .ToList();
+    
+    Console.WriteLine($"\nFiles in scripts/ directory:");
+    foreach (var entry in scriptsFiles)
+    {
+        Console.WriteLine($"  {entry.GetFileName()}");
+    }
+}
+```
+
+### Creating New Entries
+
+```csharp
+using SteamDatabase.ValvePak;
+using System.Text;
+
+var package = new Package();
+package.SetFileName("custom.vpk");
+
+// Add a text file
+var content = "# Game Configuration\nversion=1.0";
+var data = Encoding.UTF8.GetBytes(content);
+var entry = package.AddFile("scripts/config.txt", data);
+
+Console.WriteLine($"Added entry:");
+Console.WriteLine($"  Path: {entry.GetFullPath()}");
+Console.WriteLine($"  Size: {entry.TotalLength} bytes");
+Console.WriteLine($"  CRC32: 0x{entry.CRC32:X8}");
+
+// Write the package
+package.Write("custom.vpk");
+```
+
+## Notes
+
+- The `FileName`, `DirectoryName`, and `TypeName` properties are required when creating a `PackageEntry`
+- Valve's VPK implementation always uses forward slashes (`/`) as directory separators
+- Directory names are typically lowercase in Valve's implementation
+- Files without extensions have a space (` `) as their `TypeName`
+- Files in the root directory have a space (` `) as their `DirectoryName`
+- The `SmallData` property contains preloaded bytes for quick access to small files
+- Total file size is calculated as `Length + SmallData.Length`

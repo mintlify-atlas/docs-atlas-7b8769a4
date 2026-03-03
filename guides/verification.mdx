@@ -1,0 +1,346 @@
+---
+title: Package Verification
+description: Learn how to verify VPK package integrity using checksums and signatures
+---
+
+VPK version 2 packages include multiple verification mechanisms to ensure data integrity. This guide covers all available verification methods.
+
+## Overview
+
+ValvePak provides four verification methods:
+
+1. **VerifyHashes** - Verifies MD5 hashes of the package structure
+2. **VerifyChunkHashes** - Verifies MD5/Blake3 hashes of individual data chunks
+3. **VerifyFileChecksums** - Verifies CRC32 checksums of every file
+4. **IsSignatureValid** - Verifies RSA signature if present
+
+<Note>
+  All verification methods are only available for VPK version 2 packages. Version 1 packages don't include hash data.
+</Note>
+
+## Verifying Package Hashes
+
+Use `VerifyHashes()` to verify the MD5 checksums of the package structure:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+try
+{
+    package.VerifyHashes();
+    Console.WriteLine("Package hashes verified successfully");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"Hash verification failed: {ex.Message}");
+}
+```
+
+This method verifies three checksums:
+
+1. **Tree Checksum** - MD5 of the directory tree structure
+2. **Archive MD5 Entries Checksum** - MD5 of the chunk hash section
+3. **Whole File Checksum** - MD5 of the entire package up to the signature
+
+<Warning>
+  `VerifyHashes()` requires version 2 packages and will throw `InvalidDataException` for version 1.
+</Warning>
+
+## Verifying Chunk Hashes
+
+For multi-part VPK packages, use `VerifyChunkHashes()` to verify individual data file chunks:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+try
+{
+    package.VerifyChunkHashes();
+    Console.WriteLine("All chunk hashes verified");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"Chunk verification failed: {ex.Message}");
+}
+```
+
+This verifies hashes for each chunk file (`pak01_000.vpk`, `pak01_001.vpk`, etc.).
+
+### With Progress Reporting
+
+You can monitor verification progress:
+
+```csharp
+var progress = new Progress<string>(message => 
+{
+    Console.WriteLine(message);
+});
+
+package.VerifyChunkHashes(progress);
+```
+
+Output:
+```
+Verifying MD5 hash at offset 0 in archive 0.
+Verifying MD5 hash at offset 1048576 in archive 0.
+Verifying Blake3 hash at offset 0 in archive 1.
+Successfully verified archive hashes.
+```
+
+### Supported Hash Types
+
+VPK packages can use different hash algorithms for chunks:
+
+- **MD5** (`EHashType.MD5`) - Legacy hash algorithm
+- **Blake3** (`EHashType.Blake3`) - Modern, faster hash algorithm
+
+The library automatically detects and uses the appropriate algorithm:
+
+```csharp
+foreach (var hash in package.AccessPackFileHashes)
+{
+    Console.WriteLine($"Archive {hash.ArchiveIndex}: {hash.HashType} hash");
+    Console.WriteLine($"  Offset: {hash.Offset}, Length: {hash.Length}");
+    Console.WriteLine($"  Checksum: {Convert.ToHexString(hash.Checksum)}");
+}
+```
+
+## Verifying File Checksums
+
+Use `VerifyFileChecksums()` to verify the CRC32 checksum of every file in the package:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+try
+{
+    package.VerifyFileChecksums();
+    Console.WriteLine("All file checksums verified");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"Checksum verification failed: {ex.Message}");
+}
+```
+
+This reads and verifies every file in the package, which can take time for large packages.
+
+### With Progress Reporting
+
+```csharp
+var progress = new Progress<string>(message => 
+{
+    Console.WriteLine(message);
+});
+
+package.VerifyFileChecksums(progress);
+```
+
+Output:
+```
+Verifying CRC32 checksum for 'models/props/barrel.vmdl' in archive 0.
+Verifying CRC32 checksum for 'textures/brick.vtex' in archive 1.
+Verifying CRC32 checksum for 'scripts/config.txt' in archive 32767.
+Successfully verified file CRC32 checksums.
+```
+
+<Note>
+  Archive index `32767` (0x7FFF) indicates the file is stored in the `_dir.vpk` file itself.
+</Note>
+
+## Verifying RSA Signatures
+
+Some VPK packages are digitally signed with RSA. Use `IsSignatureValid()` to verify the signature:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+if (package.PublicKey == null || package.Signature == null)
+{
+    Console.WriteLine("Package is not signed");
+}
+else
+{
+    bool isValid = package.IsSignatureValid();
+    
+    if (isValid)
+    {
+        Console.WriteLine("Signature is valid");
+    }
+    else
+    {
+        Console.WriteLine("WARNING: Invalid signature!");
+    }
+}
+```
+
+### Signature Types
+
+VPK packages support two signature modes:
+
+```csharp
+if (package.SignatureType == ESignatureType.FullFile)
+{
+    Console.WriteLine("Signature covers entire file");
+}
+else if (package.SignatureType == ESignatureType.OnlyFileChecksum)
+{
+    Console.WriteLine("Signature covers only the MD5 hash");
+    // Signs SHA256(MD5(file))
+}
+```
+
+### Signature Properties
+
+Access signature information:
+
+```csharp
+if (package.PublicKey != null)
+{
+    Console.WriteLine($"Public Key Size: {package.PublicKey.Length} bytes");
+    Console.WriteLine($"Signature Size: {package.Signature?.Length ?? 0} bytes");
+    Console.WriteLine($"Signature Type: {package.SignatureType}");
+}
+```
+
+## Complete Verification Example
+
+Here's a complete example that performs all verification checks:
+
+```csharp
+using SteamDatabase.ValvePak;
+
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+Console.WriteLine($"VPK Version: {package.Version}");
+
+if (package.Version != 2)
+{
+    Console.WriteLine("Verification requires VPK version 2");
+    return;
+}
+
+var progress = new Progress<string>(Console.WriteLine);
+
+// 1. Verify package structure hashes
+try
+{
+    Console.WriteLine("\n[1/4] Verifying package hashes...");
+    package.VerifyHashes();
+    Console.WriteLine("✓ Package hashes valid");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"✗ Package hash verification failed: {ex.Message}");
+    return;
+}
+
+// 2. Verify chunk hashes
+try
+{
+    Console.WriteLine("\n[2/4] Verifying chunk hashes...");
+    package.VerifyChunkHashes(progress);
+    Console.WriteLine("✓ All chunk hashes valid");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"✗ Chunk verification failed: {ex.Message}");
+    return;
+}
+
+// 3. Verify file checksums
+try
+{
+    Console.WriteLine("\n[3/4] Verifying file checksums...");
+    package.VerifyFileChecksums(progress);
+    Console.WriteLine("✓ All file checksums valid");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"✗ File checksum verification failed: {ex.Message}");
+    return;
+}
+
+// 4. Verify signature
+Console.WriteLine("\n[4/4] Verifying signature...");
+if (package.PublicKey == null || package.Signature == null)
+{
+    Console.WriteLine("ℹ Package is not signed");
+}
+else
+{
+    bool isValid = package.IsSignatureValid();
+    if (isValid)
+    {
+        Console.WriteLine($"✓ {package.SignatureType} signature valid");
+    }
+    else
+    {
+        Console.WriteLine("✗ Invalid signature!");
+        return;
+    }
+}
+
+Console.WriteLine("\n✓ All verification checks passed");
+```
+
+## Performance Considerations
+
+<AccordionGroup>
+  <Accordion title="VerifyHashes" icon="gauge-high">
+    **Fast** - Only reads the package structure, not file contents
+  </Accordion>
+  
+  <Accordion title="VerifyChunkHashes" icon="gauge">
+    **Medium** - Reads all data files in 1MB chunks
+  </Accordion>
+  
+  <Accordion title="VerifyFileChecksums" icon="gauge-low">
+    **Slow** - Reads and validates every individual file
+  </Accordion>
+  
+  <Accordion title="IsSignatureValid" icon="gauge-high">
+    **Fast** - Only cryptographic verification, no file reading for `OnlyFileChecksum` mode
+  </Accordion>
+</AccordionGroup>
+
+For best performance when you need comprehensive verification:
+
+1. Call `VerifyHashes()` first (fast, catches major corruption)
+2. Call `IsSignatureValid()` if signed (fast, cryptographic proof)
+3. Call `VerifyChunkHashes()` if needed (medium speed)
+4. Call `VerifyFileChecksums()` only when necessary (slowest)
+
+## Error Messages
+
+Common error messages and their meanings:
+
+```csharp
+// File tree corrupted
+"File tree checksum mismatch (A1B2C3... != expected D4E5F6...)"
+
+// Data file corrupted
+"Package checksum mismatch (MD5) in archive 0 at 1048576"
+
+// Individual file corrupted
+"CRC32 mismatch for read data (expected ABCD1234, got EFGH5678)"
+
+// Wrong version
+"Only version 2 is supported."
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Reading VPK Files" icon="book-open" href="/guides/reading-vpk">
+    Learn how to open and read VPK packages
+  </Card>
+  <Card title="Extracting Files" icon="download" href="/guides/extracting-files">
+    Learn how to extract file contents
+  </Card>
+</CardGroup>

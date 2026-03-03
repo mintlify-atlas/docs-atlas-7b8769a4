@@ -1,0 +1,69 @@
+---
+title: 'ChunkHashFraction'
+description: 'Represents checksum information for a chunk of archive data in VPK files'
+---
+
+## Overview
+
+The `ChunkHashFraction` class represents an entry in the VPK archive hashes section. Each instance contains checksum information for a specific chunk of archive data, enabling verification of archive integrity at a granular level.
+
+These entries are stored in the `AccessPackFileHashes` property of a VPK package and are used by verification methods to validate archive data chunks.
+
+## Properties
+
+<ResponseField name="ArchiveIndex" type="ushort" required>
+  The archive index that this hash entry applies to. Used to identify which archive file contains the chunk to be verified.
+</ResponseField>
+
+<ResponseField name="HashType" type="EHashType" required>
+  The hash algorithm type used for this entry. Can be either `MD5` (0) or `Blake3` (1). See [EHashType](/api/hash-type) for more details.
+</ResponseField>
+
+<ResponseField name="Offset" type="uint" required>
+  The offset in bytes within the archive file where the chunk begins.
+</ResponseField>
+
+<ResponseField name="Length" type="uint" required>
+  The length in bytes of the chunk to be hashed.
+</ResponseField>
+
+<ResponseField name="Checksum" type="byte[]" required>
+  The expected checksum value for the chunk. The length and format depend on the `HashType` (16 bytes for MD5, 16 bytes for Blake3).
+</ResponseField>
+
+## Usage
+
+### Accessing Chunk Hashes
+
+Chunk hash fractions are accessed through the `AccessPackFileHashes` property of a `Package` instance:
+
+```csharp
+var package = new Package();
+package.Read("path/to/pak01_dir.vpk");
+
+// Access all chunk hash entries
+var chunkHashes = package.AccessPackFileHashes;
+
+foreach (var hash in chunkHashes)
+{
+    Console.WriteLine($"Archive {hash.ArchiveIndex}: {hash.HashType} hash at offset {hash.Offset}");
+}
+```
+
+### Verifying Chunk Hashes
+
+Chunk hash fractions are used internally by the `VerifyChunkHashes` method:
+
+```csharp
+var package = new Package();
+package.Read("path/to/pak01_dir.vpk");
+
+// Verify all archive chunks using the stored hash entries
+package.VerifyChunkHashes(new Progress<string>(msg => Console.WriteLine(msg)));
+```
+
+## See Also
+
+- [EHashType](/api/hash-type) - Hash algorithm enumeration
+- [Package.VerifyChunkHashes](/api/package#verifychunkhashes) - Method that uses chunk hash fractions for verification
+- [Package.AccessPackFileHashes](/api/package#accesspackfilehashes) - Property containing all chunk hash entries

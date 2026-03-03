@@ -1,0 +1,59 @@
+---
+title: Introduction
+description: A powerful .NET library for reading, extracting, and creating VPK (Valve Pak) archives used in Source and Source 2 engine games
+---
+
+# Introduction to ValvePak
+
+ValvePak is a .NET library for reading and extracting VPK (Valve Pak) files, the uncompressed archive format used to package game content in Source and Source 2 engine games.
+
+## What is VPK?
+
+VPK (Valve Pak) files are uncompressed archives that package game assets for Valve's Source and Source 2 engine games. These archives are used in popular games like Counter-Strike: Global Offensive, Dota 2, Team Fortress 2, and Half-Life: Alyx.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Read VPK archives" icon="folder-open">
+    Open and read VPK files, including multi-chunk archives with `_dir.vpk` directory files
+  </Card>
+  
+  <Card title="Extract files" icon="file-export">
+    Extract individual files or entire archives with support for metadata inspection
+  </Card>
+  
+  <Card title="Create VPK packages" icon="box">
+    Build new VPK archives by adding files programmatically
+  </Card>
+  
+  <Card title="Verify integrity" icon="shield-check">
+    Validate MD5 hashes, CRC32 checksums, and RSA signatures
+  </Card>
+  
+  <Card title="High performance" icon="rocket">
+    Memory-mapped file access, binary search optimization, and buffer pooling for efficient operations
+  </Card>
+  
+  <Card title="Stream-based access" icon="stream">
+    Access large files without loading entire contents into memory
+  </Card>
+</CardGroup>
+
+## Common use cases
+
+- **Game modding**: Extract and modify game assets from Source engine games
+- **Content analysis**: Inspect game files and their metadata
+- **Asset extraction**: Extract textures, models, sounds, and other game resources
+- **Custom packaging**: Create custom VPK archives for game mods or tools
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install ValvePak via NuGet and set up your project
+  </Card>
+  
+  <Card title="Quick start" icon="bolt" href="/quickstart">
+    Learn how to read and extract VPK files in minutes
+  </Card>
+</CardGroup>

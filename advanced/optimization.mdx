@@ -1,0 +1,115 @@
+---
+title: "Binary Search Optimization"
+description: "Optimize FindEntry performance with binary search for high-volume file lookups"
+---
+
+## Overview
+
+By default, `FindEntry` performs a linear scan through all package entries. For applications that need to look up many files, you can optimize the package for binary search, providing significantly faster lookups.
+
+## OptimizeEntriesForBinarySearch Method
+
+Call this method before reading a package to enable binary search optimization:
+
+```csharp
+public void OptimizeEntriesForBinarySearch(StringComparison comparison = StringComparison.Ordinal)
+```
+
+Source: Package.cs:308
+
+### Parameters
+
+- **comparison** (`StringComparison`, optional): The comparison method to use. Defaults to `StringComparison.Ordinal`.
+  - Use `StringComparison.Ordinal` for case-sensitive searches (default)
+  - Use `StringComparison.OrdinalIgnoreCase` for case-insensitive searches
+
+<Note>
+This method **must** be called before `Read()`. It will throw an `InvalidOperationException` if called after the package has been loaded.
+</Note>
+
+## When to Use Binary Search Optimization
+
+Consider using binary search optimization when:
+
+- You need to look up many files (hundreds or thousands of lookups)
+- Your application performs frequent file queries
+- Lookup performance is critical to your application
+- You want to support case-insensitive file searches
+
+<Tip>
+Binary search reduces lookup complexity from O(n) to O(log n), making it ideal for applications that repeatedly query package contents.
+</Tip>
+
+## Case-Insensitive Search
+
+One of the key benefits of binary search optimization is support for case-insensitive file lookups:
+
+```csharp
+using var package = new Package();
+
+// Enable case-insensitive binary search
+package.OptimizeEntriesForBinarySearch(StringComparison.OrdinalIgnoreCase);
+package.Read("pak01_dir.vpk");
+
+// All of these will find the same file
+var file1 = package.FindEntry("path/to/file.txt");
+var file2 = package.FindEntry("PATH/TO/FILE.TXT");
+var file3 = package.FindEntry("Path/To/File.Txt");
+```
+
+<Note>
+Case-insensitive search is **only available** when using binary search optimization. Without optimization, `FindEntry` performs case-sensitive exact matching.
+</Note>
+
+## Usage Example
+
+```csharp
+using var package = new Package();
+
+// Call before Read() to enable binary search for FindEntry
+package.OptimizeEntriesForBinarySearch();
+package.Read("pak01_dir.vpk");
+
+// FindEntry calls are now significantly faster
+var file = package.FindEntry("path/to/file.txt");
+```
+
+## Performance Comparison
+
+From the ValvePak README, the performance improvement is significant:
+
+**Without optimization (linear scan):**
+- Lookup complexity: O(n)
+- Each lookup scans through all entries until a match is found
+
+**With binary search optimization:**
+- Lookup complexity: O(log n)
+- Each lookup uses binary search on sorted entries
+
+For a package with 10,000 files:
+- Linear scan: up to 10,000 comparisons per lookup
+- Binary search: maximum ~14 comparisons per lookup
+
+## How It Works
+
+When you call `OptimizeEntriesForBinarySearch()`:
+
+1. A custom comparer is created with your specified `StringComparison`
+2. During `Read()`, entries are sorted using this comparer (Package.Read.cs:246)
+3. `FindEntry()` detects the comparer and uses binary search instead of linear scan (Package.cs:252-297)
+
+The binary search implementation is optimized to avoid string allocations by comparing `ReadOnlySpan<char>` directly.
+
+## Best Practices
+
+<Tip>
+**Always call before Read()**: The optimization must be enabled before loading the package. This allows entries to be sorted during the read process.
+</Tip>
+
+<Tip>
+**Choose the right comparison**: Use `StringComparison.Ordinal` for exact matching (faster) or `StringComparison.OrdinalIgnoreCase` when you need case-insensitive lookups.
+</Tip>
+
+<Tip>
+**Benchmark your use case**: For applications that only perform a few lookups, the overhead of sorting may not be worth it. Binary search optimization shines when you have many repeated lookups.
+</Tip>

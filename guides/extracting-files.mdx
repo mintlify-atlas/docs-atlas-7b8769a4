@@ -1,0 +1,236 @@
+---
+title: Extracting Files
+description: Learn how to extract file contents from VPK packages
+---
+
+This guide covers different methods for reading and extracting file contents from VPK archives.
+
+## Extracting a Single File
+
+The simplest way to extract a file is using `ReadEntry`, which returns the data as a byte array:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+var entry = package.FindEntry("path/to/file.txt");
+
+if (entry != null)
+{
+    // Read file contents into a byte array
+    package.ReadEntry(entry, out byte[] fileContents);
+    
+    // Use the file data
+    File.WriteAllBytes("output.txt", fileContents);
+}
+```
+
+<Note>
+  By default, `ReadEntry` validates the CRC32 checksum. You can disable this by passing `validateCrc: false` for better performance.
+</Note>
+
+## Extracting All Files
+
+To extract all files from a package, iterate through the entries:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+foreach (var typeGroup in package.Entries)
+{
+    foreach (var entry in typeGroup.Value)
+    {
+        var filePath = entry.GetFullPath();
+        
+        // Read the file data
+        package.ReadEntry(entry, out byte[] data);
+        
+        // Create the directory if needed
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath));
+        
+        // Write the file
+        File.WriteAllBytes(filePath, data);
+    }
+}
+```
+
+## Using a User-Provided Buffer
+
+For better memory efficiency, you can provide your own buffer:
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+
+// Allocate your own buffer (must be at least entry.TotalLength bytes)
+var buffer = new byte[entry.TotalLength];
+package.ReadEntry(entry, buffer, validateCrc: true);
+
+// Use the buffer data
+Console.WriteLine(Encoding.UTF8.GetString(buffer));
+```
+
+### Using ArrayPool for High Performance
+
+When extracting many files, use `ArrayPool` to avoid allocations:
+
+```csharp
+using System.Buffers;
+
+var entry = package.FindEntry("path/to/file.txt");
+
+// Rent a buffer from the pool
+var buffer = ArrayPool<byte>.Shared.Rent((int)entry.TotalLength);
+
+try
+{
+    package.ReadEntry(entry, buffer, validateCrc: true);
+    
+    // Use buffer[..entry.TotalLength] here
+    var actualData = buffer.AsSpan(0, (int)entry.TotalLength);
+    File.WriteAllBytes("output.txt", actualData.ToArray());
+}
+finally
+{
+    // Always return the buffer
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+```
+
+## Stream-Based Access
+
+For large files, use `GetMemoryMappedStreamIfPossible` to avoid loading the entire file into memory:
+
+```csharp
+var entry = package.FindEntry("path/to/large_file.dat");
+
+// Returns a memory-mapped stream for files > 4 KiB
+// Returns a MemoryStream for smaller files
+using var stream = package.GetMemoryMappedStreamIfPossible(entry);
+
+// Read from the stream
+using var fileStream = File.Create("output.dat");
+stream.CopyTo(fileStream);
+```
+
+<Note>
+  This method returns:
+  - `MemoryMappedViewStream` for files larger than 4 KiB without preload data
+  - `MemoryStream` for files 4 KiB or smaller, or files with preload data
+</Note>
+
+<Warning>
+  Memory mapping only works when:
+  - Entries have no preload bytes (`SmallData.Length == 0`)
+  - The package was opened with `Read(string)` or with a `FileStream`
+</Warning>
+
+## Understanding Preload Data
+
+VPK files can store small amounts of data directly in the directory file for faster access. This is called "preload data" or "SmallData":
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+
+if (entry.SmallData.Length > 0)
+{
+    Console.WriteLine($"This file has {entry.SmallData.Length} bytes of preload data");
+}
+
+Console.WriteLine($"Total file size: {entry.TotalLength} bytes");
+Console.WriteLine($"Data file portion: {entry.Length} bytes");
+Console.WriteLine($"Preload portion: {entry.SmallData.Length} bytes");
+```
+
+The `ReadEntry` method automatically combines both portions:
+
+1. Copies preload data from `SmallData` first
+2. Reads remaining data from the data file
+3. Returns the complete file contents
+
+## Reading from Specific Archive Files
+
+Files in multi-part VPK packages are stored across multiple data files. The `ArchiveIndex` tells you which file contains the data:
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+
+if (entry.ArchiveIndex == 0x7FFF)
+{
+    Console.WriteLine("File is stored in the _dir.vpk file");
+}
+else
+{
+    Console.WriteLine($"File is in pak01_{entry.ArchiveIndex:D3}.vpk");
+    Console.WriteLine($"At offset: {entry.Offset} bytes");
+}
+```
+
+<Note>
+  The special value `0x7FFF` indicates the file is stored in the directory VPK itself, not in a separate data file.
+</Note>
+
+## Performance Comparison
+
+Choose the right extraction method based on your needs:
+
+<CodeGroup>
+```csharp Simple (Best for small files)
+package.ReadEntry(entry, out byte[] data);
+```
+
+```csharp User Buffer (Memory efficient)
+var buffer = new byte[entry.TotalLength];
+package.ReadEntry(entry, buffer);
+```
+
+```csharp ArrayPool (High performance)
+var buffer = ArrayPool<byte>.Shared.Rent((int)entry.TotalLength);
+try {
+    package.ReadEntry(entry, buffer);
+    // Use buffer
+} finally {
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+```
+
+```csharp Memory Mapped (Large files)
+using var stream = package.GetMemoryMappedStreamIfPossible(entry);
+stream.CopyTo(outputStream);
+```
+</CodeGroup>
+
+## CRC32 Validation
+
+By default, `ReadEntry` verifies the CRC32 checksum:
+
+```csharp
+try
+{
+    // Validates CRC32 by default
+    package.ReadEntry(entry, out byte[] data);
+    Console.WriteLine("File integrity verified");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"CRC32 mismatch: {ex.Message}");
+}
+```
+
+Disable validation for better performance if you trust the package:
+
+```csharp
+// Skip CRC32 validation
+package.ReadEntry(entry, out byte[] data, validateCrc: false);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating VPK Files" icon="file-plus" href="/guides/creating-vpk">
+    Learn how to create and modify VPK packages
+  </Card>
+  <Card title="Verification" icon="shield-check" href="/guides/verification">
+    Verify package integrity with checksums and signatures
+  </Card>
+</CardGroup>

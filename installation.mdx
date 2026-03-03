@@ -1,0 +1,70 @@
+---
+title: Installation
+description: Install the ValvePak library in your .NET project using NuGet
+---
+
+# Installation
+
+ValvePak is distributed as a NuGet package and can be easily added to your .NET project.
+
+## Prerequisites
+
+Before installing ValvePak, ensure you have:
+
+- **.NET 8.0 or higher**: The library targets .NET 8.0
+- **A .NET project**: Create a new project or use an existing one
+
+<Note>
+ValvePak is AOT (Ahead-of-Time) compatible and supports nullable reference types for improved code safety.
+</Note>
+
+## Install via NuGet
+
+You can install ValvePak using your preferred package manager:
+
+<CodeGroup>
+```bash dotnet CLI
+dotnet add package ValvePak
+```
+
+```powershell Package Manager
+Install-Package ValvePak
+```
+
+```bash Paket CLI
+paket add ValvePak
+```
+</CodeGroup>
+
+## Verify installation
+
+After installing the package, verify it by adding the namespace to your code:
+
+```csharp
+using SteamDatabase.ValvePak;
+
+// Create a new package instance
+using var package = new Package();
+Console.WriteLine("ValvePak is ready!");
+```
+
+If the code compiles without errors, you're ready to start working with VPK files.
+
+## Dependencies
+
+ValvePak automatically installs the following dependencies:
+
+- **Blake3**: For Blake3 hash verification
+- **System.IO.Hashing**: For CRC32 and MD5 hashing support
+
+<Info>
+You don't need to manually install these dependencies - they're included automatically when you install ValvePak.
+</Info>
+
+## Next steps
+
+Now that you have ValvePak installed, you're ready to start working with VPK files.
+
+<Card title="Quick start" icon="bolt" href="/quickstart">
+  Learn how to read and extract VPK files in your first project
+</Card>

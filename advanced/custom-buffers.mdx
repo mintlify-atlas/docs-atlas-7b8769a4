@@ -1,0 +1,259 @@
+---
+title: "Custom Buffer Management"
+description: "Use user-provided buffers and ArrayPool to eliminate allocations when reading VPK entries"
+---
+
+## Overview
+
+ValvePak supports reading entries into user-provided buffers, allowing you to manage memory allocation yourself. This is particularly useful for high-performance scenarios where you want to avoid garbage collection pressure.
+
+## ReadEntry with User-Provided Buffers
+
+The `ReadEntry` method has an overload that accepts a pre-allocated buffer:
+
+```csharp
+public void ReadEntry(PackageEntry entry, byte[] output, bool validateCrc = true)
+```
+
+Source: Package.Read.cs:110
+
+### Parameters
+
+- **entry** (`PackageEntry`): The package entry to read
+- **output** (`byte[]`): Pre-allocated buffer to read the entry into
+- **validateCrc** (`bool`, optional): Whether to verify the CRC32 checksum. Defaults to `true`.
+
+<Note>
+The buffer size **must** be at least `entry.TotalLength` bytes. If the buffer is too small, an `ArgumentOutOfRangeException` will be thrown.
+</Note>
+
+## Buffer Size Requirements
+
+Before allocating a buffer, check the entry's total length:
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+
+// Buffer must be at least this size
+var requiredSize = entry.TotalLength;
+
+// Allocate your own buffer (must be at least entry.TotalLength bytes)
+var buffer = new byte[entry.TotalLength];
+package.ReadEntry(entry, buffer, validateCrc: true);
+```
+
+The library validates buffer size before reading:
+
+```csharp
+if (output.Length < totalLength)
+{
+    throw new ArgumentOutOfRangeException(nameof(output), 
+        "Size of the provided output buffer is smaller than entry.TotalLength.");
+}
+```
+
+Source: Package.Read.cs:118-120
+
+## Using ArrayPool to Avoid Allocations
+
+`ArrayPool<T>` allows you to rent and return buffers, eliminating allocations when reading many files:
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+
+var buffer = ArrayPool<byte>.Shared.Rent((int)entry.TotalLength);
+
+try
+{
+    package.ReadEntry(entry, buffer, validateCrc: true);
+
+    // Use buffer[..entry.TotalLength] here
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+```
+
+### Important: Slice the Buffer
+
+`ArrayPool<byte>.Rent()` may return a buffer **larger** than requested. Always use only the bytes you need:
+
+```csharp
+var buffer = ArrayPool<byte>.Shared.Rent((int)entry.TotalLength);
+
+try
+{
+    package.ReadEntry(entry, buffer, validateCrc: true);
+
+    // Correct: Use only the actual entry length
+    var actualData = buffer.AsSpan(0, (int)entry.TotalLength);
+    ProcessData(actualData);
+
+    // Or with arrays:
+    var actualData = buffer[..(int)entry.TotalLength];
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+```
+
+<Tip>
+Always slice the rented buffer to `entry.TotalLength` to avoid processing uninitialized memory beyond the actual file content.
+</Tip>
+
+## Reading Multiple Files with ArrayPool
+
+When reading many files, reuse a single rented buffer to minimize allocations:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+// Find the largest file to determine buffer size
+var maxSize = package.Entries
+    .SelectMany(group => group.Value)
+    .Max(entry => entry.TotalLength);
+
+// Rent a buffer large enough for the largest file
+var buffer = ArrayPool<byte>.Shared.Rent((int)maxSize);
+
+try
+{
+    foreach (var group in package.Entries)
+    {
+        foreach (var entry in group.Value)
+        {
+            package.ReadEntry(entry, buffer, validateCrc: true);
+
+            var fileData = buffer[..(int)entry.TotalLength];
+            ProcessFile(entry.GetFullPath(), fileData);
+        }
+    }
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+```
+
+## Disabling CRC Validation
+
+For maximum performance, you can skip CRC32 validation:
+
+```csharp
+var buffer = ArrayPool<byte>.Shared.Rent((int)entry.TotalLength);
+
+try
+{
+    // Skip CRC validation for faster reads
+    package.ReadEntry(entry, buffer, validateCrc: false);
+
+    var data = buffer[..(int)entry.TotalLength];
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+```
+
+<Note>
+Disabling CRC validation improves performance but removes corruption detection. Only disable validation if you're confident in the data integrity or validate checksums separately.
+</Note>
+
+## How Entry Reading Works
+
+The `ReadEntry` method handles two types of data:
+
+1. **Preload bytes** (small data in the directory file):
+```csharp
+if (entry.SmallData.Length > 0)
+{
+    entry.SmallData.CopyTo(output, 0);
+}
+```
+Source: Package.Read.cs:122-125
+
+2. **Main content** (data in chunk files):
+```csharp
+if (entry.Length > 0)
+{
+    var fs = GetFileStream(entry.ArchiveIndex);
+    try
+    {
+        fs.Seek(entry.Offset, SeekOrigin.Current);
+        int length = (int)entry.Length;
+        int readOffset = entry.SmallData.Length;
+        int bytesRead;
+        int totalRead = 0;
+        while ((bytesRead = fs.Read(output, readOffset + totalRead, length - totalRead)) != 0)
+        {
+            totalRead += bytesRead;
+        }
+    }
+    finally
+    {
+        if (entry.ArchiveIndex != 0x7FFF)
+        {
+            fs.Dispose();
+        }
+    }
+}
+```
+Source: Package.Read.cs:128-153
+
+## Performance Considerations
+
+### With Standard ReadEntry (allocates every time)
+
+```csharp
+for (int i = 0; i < 1000; i++)
+{
+    var entry = package.FindEntry($"file_{i}.txt");
+    package.ReadEntry(entry, out byte[] output); // Allocates new array
+}
+// Result: 1000 byte[] allocations
+```
+
+### With ArrayPool (zero allocations)
+
+```csharp
+var buffer = ArrayPool<byte>.Shared.Rent(maxFileSize);
+try
+{
+    for (int i = 0; i < 1000; i++)
+    {
+        var entry = package.FindEntry($"file_{i}.txt");
+        package.ReadEntry(entry, buffer); // Reuses same buffer
+        var data = buffer[..(int)entry.TotalLength];
+    }
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+// Result: 1 buffer rental, zero byte[] allocations
+```
+
+## Best Practices
+
+<Tip>
+**Always return buffers**: Use `try/finally` blocks to ensure `ArrayPool<byte>.Shared.Return(buffer)` is called even if an exception occurs.
+</Tip>
+
+<Tip>
+**Check entry.TotalLength**: Always verify the buffer is large enough before calling `ReadEntry`. The library will throw an exception if the buffer is too small.
+</Tip>
+
+<Tip>
+**Slice rented buffers**: `ArrayPool` may return buffers larger than requested. Always use `buffer[..entry.TotalLength]` to get the actual file content.
+</Tip>
+
+<Tip>
+**Reuse buffers when possible**: If reading multiple files of similar sizes, rent one buffer and reuse it across all reads to minimize allocations.
+</Tip>
+
+<Tip>
+**Consider CRC trade-offs**: Validate CRC for critical data, but consider disabling it for performance-critical scenarios where data integrity is verified elsewhere.
+</Tip>

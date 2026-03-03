@@ -1,0 +1,185 @@
+---
+title: Reading VPK Files
+description: Learn how to open and read VPK archives
+---
+
+This guide covers the basics of opening VPK files and reading file metadata.
+
+## Opening VPK Files
+
+There are two ways to open a VPK package: from a file path or from a stream.
+
+<Steps>
+  <Step title="Using a file path">
+    The simplest way to open a VPK is to pass the file path to the `Read` method:
+
+    ```csharp
+    using var package = new Package();
+    package.Read("pak01_dir.vpk");
+    ```
+
+    The file is held open until the Package object is disposed.
+  </Step>
+
+  <Step title="Using a Stream">
+    You can also pass a Stream directly:
+
+    ```csharp
+    using var package = new Package();
+    package.Read(File.OpenRead("pak01_dir.vpk"));
+    ```
+
+    <Note>
+      If you call `Read()` with a stream, you must call `SetFileName()` first to set the base path for finding data files.
+    </Note>
+
+    ```csharp
+    using var package = new Package();
+    package.SetFileName("pak01_dir.vpk");
+    package.Read(File.OpenRead("pak01_dir.vpk"));
+    ```
+  </Step>
+</Steps>
+
+## Understanding VPK File Structure
+
+<Warning>
+  Files named like `pak01_001.vpk`, `pak01_002.vpk` are data files. You must always open the `pak01_dir.vpk` file, which contains the directory tree that references the data files.
+</Warning>
+
+VPK packages come in two formats:
+
+- **Directory VPK** (`*_dir.vpk`): Contains the file tree and references to external data files
+- **Single VPK**: Contains both the file tree and data in one file
+
+The library automatically detects the format through the `IsDirVPK` property:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+if (package.IsDirVPK)
+{
+    Console.WriteLine("This is a multi-file VPK package");
+}
+```
+
+## Finding Files
+
+Use `FindEntry` to locate a file in the package:
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+
+if (entry != null)
+{
+    Console.WriteLine($"Found: {entry.GetFullPath()}");
+}
+else
+{
+    Console.WriteLine("File not found");
+}
+```
+
+<Note>
+  By default, `FindEntry` performs a linear scan. For better performance when looking up many files, see the optimization section below.
+</Note>
+
+## Reading File Metadata
+
+Once you have a `PackageEntry`, you can access various metadata:
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+
+if (entry != null)
+{
+    // File paths
+    Console.WriteLine(entry.GetFullPath());  // "path/to/file.txt"
+    Console.WriteLine(entry.GetFileName());  // "file.txt"
+    Console.WriteLine(entry.DirectoryName);  // "path/to"
+    Console.WriteLine(entry.TypeName);       // "txt"
+    
+    // File properties
+    Console.WriteLine(entry.TotalLength);    // Total size in bytes
+    Console.WriteLine(entry.Length);         // Data file size
+    Console.WriteLine(entry.SmallData.Length); // Preload data size
+    Console.WriteLine(entry.CRC32);          // CRC32 checksum
+    Console.WriteLine(entry.ArchiveIndex);   // Which data file (or 0x7FFF for _dir.vpk)
+    Console.WriteLine(entry.Offset);         // Byte offset in data file
+}
+```
+
+## Iterating All Files
+
+The `Entries` property contains all files organized by extension:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+foreach (var typeGroup in package.Entries)
+{
+    Console.WriteLine($"Extension: {typeGroup.Key}");
+    
+    foreach (var entry in typeGroup.Value)
+    {
+        Console.WriteLine($"  {entry.GetFullPath()}");
+    }
+}
+```
+
+## Optimizing File Lookups
+
+If you need to look up many files, call `OptimizeEntriesForBinarySearch()` before reading to enable binary search:
+
+```csharp
+using var package = new Package();
+
+// Call before Read() to enable binary search
+package.OptimizeEntriesForBinarySearch();
+package.Read("pak01_dir.vpk");
+
+// FindEntry calls are now significantly faster
+var file = package.FindEntry("path/to/file.txt");
+```
+
+You can also enable case-insensitive lookups:
+
+```csharp
+package.OptimizeEntriesForBinarySearch(StringComparison.OrdinalIgnoreCase);
+package.Read("pak01_dir.vpk");
+
+// Now works regardless of case
+var file = package.FindEntry("PATH/TO/FILE.TXT");
+```
+
+## Version Information
+
+The library supports VPK versions 1 and 2:
+
+```csharp
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+Console.WriteLine($"VPK Version: {package.Version}");
+Console.WriteLine($"Header Size: {package.HeaderSize} bytes");
+Console.WriteLine($"Tree Size: {package.TreeSize} bytes");
+
+if (package.Version == 2)
+{
+    Console.WriteLine($"File Data Section: {package.FileDataSectionSize} bytes");
+    Console.WriteLine($"Archive MD5 Section: {package.ArchiveMD5SectionSize} bytes");
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Extracting Files" icon="download" href="/guides/extracting-files">
+    Learn how to extract file contents from VPK packages
+  </Card>
+  <Card title="Verification" icon="shield-check" href="/guides/verification">
+    Verify package integrity with checksums and signatures
+  </Card>
+</CardGroup>

@@ -1,0 +1,449 @@
+---
+title: Package Class
+description: Core class for reading, writing, and managing VPK (Valve Pak) archive files
+---
+
+## Overview
+
+The `Package` class is the main entry point for working with VPK (Valve Pak) files, which are uncompressed archives used to package game content in Source Engine games. This class provides comprehensive functionality for reading, writing, searching, and verifying VPK packages.
+
+## Properties
+
+<ResponseField name="Version" type="uint">
+  The VPK format version (1 or 2).
+</ResponseField>
+
+<ResponseField name="IsDirVPK" type="bool">
+  Indicates whether this package is a directory VPK (has "_dir" suffix), which means it has multiple chunk files.
+</ResponseField>
+
+<ResponseField name="FileName" type="string?">
+  The file name of the VPK package.
+</ResponseField>
+
+<ResponseField name="HeaderSize" type="uint">
+  The size in bytes of the VPK header.
+</ResponseField>
+
+<ResponseField name="TreeSize" type="uint">
+  The size in bytes of the directory tree structure.
+</ResponseField>
+
+<ResponseField name="FileDataSectionSize" type="uint">
+  The size in bytes of file content stored in this VPK file (0 in CS:GO).
+</ResponseField>
+
+<ResponseField name="ArchiveMD5SectionSize" type="uint">
+  The size in bytes of the section containing MD5 checksums for external archive content.
+</ResponseField>
+
+<ResponseField name="OtherMD5SectionSize" type="uint">
+  The size in bytes of the section containing MD5 checksums for content in this file.
+</ResponseField>
+
+<ResponseField name="SignatureSectionSize" type="uint">
+  The size in bytes of the section containing the public key and signature.
+</ResponseField>
+
+<ResponseField name="TreeChecksum" type="byte[]?">
+  The MD5 checksum of the file tree.
+</ResponseField>
+
+<ResponseField name="ArchiveMD5EntriesChecksum" type="byte[]?">
+  The MD5 checksum of the archive MD5 checksum section entries.
+</ResponseField>
+
+<ResponseField name="WholeFileChecksum" type="byte[]?">
+  The MD5 checksum of the complete package until the signature structure.
+</ResponseField>
+
+<ResponseField name="PublicKey" type="byte[]?">
+  The RSA public key used for signature verification.
+</ResponseField>
+
+<ResponseField name="Signature" type="byte[]?">
+  The RSA signature of the package.
+</ResponseField>
+
+<ResponseField name="SignatureType" type="ESignatureType">
+  The type of signature used (Unknown, FullFile, or OnlyFileChecksum).
+</ResponseField>
+
+<ResponseField name="Entries" type="Dictionary<string, List<PackageEntry>>?">
+  Dictionary of package entries organized by file extension. The key is the file extension, and the value is a list of entries with that extension.
+</ResponseField>
+
+<ResponseField name="AccessPackFileHashes" type="List<ChunkHashFraction>">
+  Archive MD5 checksum section entries, also known as cache line hashes.
+</ResponseField>
+
+## Methods
+
+### Read
+
+Opens and reads a VPK package from a file path.
+
+<ParamField path="filename" type="string" required>
+  The file path to the VPK package to open and read.
+</ParamField>
+
+```csharp
+var package = new Package();
+package.Read("pak01_dir.vpk");
+```
+
+### Read (Stream)
+
+Reads a VPK package from a stream.
+
+<ParamField path="input" type="Stream" required>
+  The input stream to read from.
+</ParamField>
+
+<Note>
+  If you call `Read()` with a stream directly, you must call `SetFileName()` first.
+</Note>
+
+```csharp
+var package = new Package();
+package.SetFileName("pak01_dir.vpk");
+using var stream = File.OpenRead("pak01_dir.vpk");
+package.Read(stream);
+```
+
+### ReadEntry
+
+Reads an entry from the VPK package and returns the data.
+
+<ParamField path="entry" type="PackageEntry" required>
+  The package entry to read.
+</ParamField>
+
+<ParamField path="output" type="out byte[]" required>
+  Output buffer that will contain the entry data.
+</ParamField>
+
+<ParamField path="validateCrc" type="bool" default="true">
+  If true, CRC32 will be calculated and verified for read data.
+</ParamField>
+
+```csharp
+var entry = package.FindEntry("scripts/game_sounds.txt");
+if (entry != null)
+{
+    package.ReadEntry(entry, out byte[] data);
+    // Use the data
+}
+```
+
+### ReadEntry (User Buffer)
+
+Reads an entry from the VPK package into a user-provided output byte array.
+
+<ParamField path="entry" type="PackageEntry" required>
+  The package entry to read.
+</ParamField>
+
+<ParamField path="output" type="byte[]" required>
+  Output buffer, size must be at least `entry.TotalLength`.
+</ParamField>
+
+<ParamField path="validateCrc" type="bool" default="true">
+  If true, CRC32 will be calculated and verified for read data.
+</ParamField>
+
+```csharp
+var entry = package.FindEntry("scripts/game_sounds.txt");
+if (entry != null)
+{
+    var buffer = new byte[entry.TotalLength];
+    package.ReadEntry(entry, buffer, validateCrc: true);
+}
+```
+
+### FindEntry
+
+Searches for a file entry in the package by its full path.
+
+<ParamField path="filePath" type="string" required>
+  Full path to the file to find (e.g., "scripts/game_sounds.txt").
+</ParamField>
+
+<Info>
+  This method normalizes directory path separators from backslash (\\) to forward slash (/).
+  If `OptimizeEntriesForBinarySearch()` was called, this method uses binary search for improved performance.
+</Info>
+
+```csharp
+var entry = package.FindEntry("materials/models/props/door.vtf");
+if (entry != null)
+{
+    Console.WriteLine($"Found: {entry.GetFullPath()}");
+    Console.WriteLine($"Size: {entry.TotalLength} bytes");
+}
+```
+
+### Write
+
+Writes the package to a file.
+
+<ParamField path="filename" type="string" required>
+  The file path to write the VPK package to.
+</ParamField>
+
+<Warning>
+  Writing back to a `_dir.vpk` (directory VPK with multiple chunks) is currently unsupported.
+  Package contents cannot exceed 2 GiB as splitting packages is not yet supported.
+</Warning>
+
+```csharp
+var package = new Package();
+package.SetFileName("output.vpk");
+package.AddFile("test.txt", System.Text.Encoding.UTF8.GetBytes("Hello VPK!"));
+package.Write("output.vpk");
+```
+
+### AddFile
+
+Adds a file to the current package.
+
+<ParamField path="filePath" type="string" required>
+  Full file path for this entry (e.g., "scripts/config.txt").
+</ParamField>
+
+<ParamField path="fileData" type="byte[]" required>
+  File data for this entry.
+</ParamField>
+
+<Warning>
+  This method does not check for duplicate entries. Be careful not to add the same file multiple times.
+</Warning>
+
+```csharp
+var package = new Package();
+package.SetFileName("custom.vpk");
+
+// Add a text file
+var textData = System.Text.Encoding.UTF8.GetBytes("Sample content");
+package.AddFile("scripts/sample.txt", textData);
+
+// Add a binary file
+var binaryData = File.ReadAllBytes("icon.png");
+package.AddFile("materials/icon.png", binaryData);
+
+package.Write("custom.vpk");
+```
+
+### RemoveFile
+
+Removes a file from the current package.
+
+<ParamField path="entry" type="PackageEntry" required>
+  The package entry to remove.
+</ParamField>
+
+Returns `true` if the entry was removed, `false` otherwise.
+
+```csharp
+var entry = package.FindEntry("scripts/old_config.txt");
+if (entry != null)
+{
+    if (package.RemoveFile(entry))
+    {
+        Console.WriteLine("File removed successfully");
+    }
+}
+```
+
+### GetMemoryMappedStreamIfPossible
+
+Returns a `MemoryMappedViewStream` when possible, otherwise reads the entry into a byte array and returns a `MemoryStream`.
+
+<ParamField path="entry" type="PackageEntry" required>
+  The package entry to get a stream for.
+</ParamField>
+
+<Info>
+  - Only works when entries have no preload bytes
+  - Files ≤ 4096 bytes will be read into memory
+  - For non-split packages (`IsDirVPK` = false), memory mapping only works if the package was opened using `Read(string)` or with a `FileStream`
+</Info>
+
+```csharp
+var entry = package.FindEntry("models/large_model.mdl");
+if (entry != null)
+{
+    using var stream = package.GetMemoryMappedStreamIfPossible(entry);
+    // Process the stream efficiently without loading entire file into memory
+}
+```
+
+### OptimizeEntriesForBinarySearch
+
+Sorts the package entries to enable binary search in `FindEntry()` for improved performance.
+
+<ParamField path="comparison" type="StringComparison" default="StringComparison.Ordinal">
+  Comparison method to use. Use `StringComparison.OrdinalIgnoreCase` for case-insensitive search.
+</ParamField>
+
+<Warning>
+  This method must be called **before** calling `Read()` to load a package.
+  This is an experimental feature and may be removed in a future release.
+</Warning>
+
+```csharp
+var package = new Package();
+package.OptimizeEntriesForBinarySearch(StringComparison.OrdinalIgnoreCase);
+package.Read("pak01_dir.vpk");
+
+// Now FindEntry will use binary search and be case-insensitive
+var entry = package.FindEntry("SCRIPTS/Game_Sounds.TXT");
+```
+
+### VerifyHashes
+
+Verifies all MD5 hashes provided in the VPK package.
+
+<Note>
+  Only VPK version 2 packages are supported. This verifies the file tree checksum, archive MD5 entries checksum, and whole file checksum.
+</Note>
+
+```csharp
+try
+{
+    package.VerifyHashes();
+    Console.WriteLine("All hashes verified successfully!");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"Hash verification failed: {ex.Message}");
+}
+```
+
+### VerifyChunkHashes
+
+Verifies hashes of individual chunk files in the VPK package.
+
+<ParamField path="progressReporter" type="IProgress<string>?" default="null">
+  Optional progress reporter that will receive status messages during verification.
+</ParamField>
+
+```csharp
+var progress = new Progress<string>(message => Console.WriteLine(message));
+
+try
+{
+    package.VerifyChunkHashes(progress);
+    Console.WriteLine("All chunk hashes verified!");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"Chunk verification failed: {ex.Message}");
+}
+```
+
+### VerifyFileChecksums
+
+Verifies CRC32 checksums of all files in the package.
+
+<ParamField path="progressReporter" type="IProgress<string>?" default="null">
+  Optional progress reporter that will receive status messages during verification.
+</ParamField>
+
+```csharp
+var progress = new Progress<string>(message => Console.WriteLine(message));
+
+try
+{
+    package.VerifyFileChecksums(progress);
+    Console.WriteLine("All file checksums verified!");
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"Checksum verification failed: {ex.Message}");
+}
+```
+
+### IsSignatureValid
+
+Verifies the RSA signature of the package.
+
+Returns `true` if the signature is valid, `false` otherwise.
+
+```csharp
+if (package.IsSignatureValid())
+{
+    Console.WriteLine("Package signature is valid");
+}
+else
+{
+    Console.WriteLine("Package signature is invalid or missing");
+}
+```
+
+## Usage Example
+
+Here's a complete example demonstrating how to work with VPK packages:
+
+```csharp
+using SteamDatabase.ValvePak;
+using System;
+using System.IO;
+
+// Open and read a VPK package
+using var package = new Package();
+package.Read("pak01_dir.vpk");
+
+Console.WriteLine($"VPK Version: {package.Version}");
+Console.WriteLine($"Is Directory VPK: {package.IsDirVPK}");
+Console.WriteLine($"Total extensions: {package.Entries?.Count}");
+
+// Find and read a specific file
+var entry = package.FindEntry("scripts/game_sounds.txt");
+if (entry != null)
+{
+    Console.WriteLine($"Found: {entry.GetFullPath()}");
+    Console.WriteLine($"  Size: {entry.TotalLength} bytes");
+    Console.WriteLine($"  CRC32: 0x{entry.CRC32:X8}");
+    Console.WriteLine($"  Archive: {entry.ArchiveIndex}");
+    
+    // Read the file data
+    package.ReadEntry(entry, out byte[] data);
+    var text = System.Text.Encoding.UTF8.GetString(data);
+    Console.WriteLine($"  Content preview: {text.Substring(0, Math.Min(100, text.Length))}...");
+}
+
+// List all files with a specific extension
+if (package.Entries != null && package.Entries.TryGetValue("txt", out var txtFiles))
+{
+    Console.WriteLine($"\nFound {txtFiles.Count} .txt files:");
+    foreach (var file in txtFiles.Take(10))
+    {
+        Console.WriteLine($"  - {file.GetFullPath()}");
+    }
+}
+
+// Verify package integrity
+try
+{
+    if (package.Version == 2)
+    {
+        package.VerifyHashes();
+        Console.WriteLine("\nPackage hashes verified successfully!");
+    }
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"\nVerification failed: {ex.Message}");
+}
+```
+
+## Constants
+
+<ResponseField name="MAGIC" type="const int">
+  VPK file signature magic number: `0x55AA1234`
+</ResponseField>
+
+<ResponseField name="DirectorySeparatorChar" type="const char">
+  Always `/` as per Valve's VPK implementation.
+</ResponseField>

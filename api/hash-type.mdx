@@ -1,0 +1,77 @@
+---
+title: 'EHashType'
+description: 'Hash algorithm types used in VPK archive hash entries'
+---
+
+## Overview
+
+The `EHashType` enum represents the hash algorithm type used in VPK archive hash section entries. This enum is used to identify which hashing algorithm was used to generate checksums for archive chunks.
+
+## Type Definition
+
+```csharp
+public enum EHashType : ushort
+```
+
+Note: This enum uses `ushort` as its underlying type instead of the default `int`.
+
+## Values
+
+<ResponseField name="MD5" type="ushort" default="0">
+  MD5 hash algorithm. This is the legacy hash type used in VPK files.
+</ResponseField>
+
+<ResponseField name="Blake3" type="ushort" default="1">
+  Blake3 hash algorithm. This is a modern, faster, and more secure hash algorithm supported in newer VPK formats.
+</ResponseField>
+
+## Usage
+
+### Checking Hash Type
+
+```csharp
+var package = new Package();
+package.Read("path/to/pak01_dir.vpk");
+
+foreach (var hashEntry in package.AccessPackFileHashes)
+{
+    switch (hashEntry.HashType)
+    {
+        case EHashType.MD5:
+            Console.WriteLine("Using MD5 hash");
+            break;
+        case EHashType.Blake3:
+            Console.WriteLine("Using Blake3 hash");
+            break;
+        default:
+            Console.WriteLine($"Unknown hash type: {hashEntry.HashType}");
+            break;
+    }
+}
+```
+
+### Hash Algorithm Selection
+
+The hash type is stored in each `ChunkHashFraction` entry and determines which algorithm the verification methods use:
+
+```csharp
+var package = new Package();
+package.Read("path/to/pak01_dir.vpk");
+
+// The VerifyChunkHashes method automatically uses the correct
+// hash algorithm based on each entry's HashType
+package.VerifyChunkHashes();
+```
+
+## Implementation Notes
+
+- MD5 produces 16-byte (128-bit) hashes
+- Blake3 produces variable-length hashes, but VPK uses 16-byte hashes for consistency
+- The verification process automatically selects the appropriate hashing algorithm based on the `HashType` value
+- Blake3 is generally faster and more secure than MD5, but MD5 is still supported for compatibility with older VPK files
+
+## See Also
+
+- [ChunkHashFraction](/api/chunk-hash-fraction) - Class that uses EHashType
+- [Package.VerifyChunkHashes](/api/package#verifychunkhashes) - Method that processes different hash types
+- [Package.AccessPackFileHashes](/api/package#accesspackfilehashes) - Property containing hash entries with hash types

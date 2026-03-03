@@ -1,0 +1,99 @@
+---
+title: 'ESignatureType'
+description: 'RSA signature types used in VPK archive verification'
+---
+
+## Overview
+
+The `ESignatureType` enum represents the RSA signature type used in VPK archives. This enum determines how the signature verification process validates the integrity and authenticity of VPK files.
+
+## Type Definition
+
+```csharp
+public enum ESignatureType
+```
+
+## Values
+
+<ResponseField name="Unknown" type="int" default="-1">
+  Type not yet determined. This value is used when the signature type has not been identified during package parsing.
+</ResponseField>
+
+<ResponseField name="FullFile" type="int" default="0">
+  RSA legacy signature format. The signature is computed over the entire file contents up to the signature section. This is the older signature method used in VPK files.
+</ResponseField>
+
+<ResponseField name="OnlyFileChecksum" type="int" default="1">
+  RSA-4096 signature format (version 1). The signature is computed over the MD5 hash of the file rather than the entire file contents. This approach is more efficient as it uses SHA256(MD5(file)) for verification.
+</ResponseField>
+
+## Usage
+
+### Checking Signature Type
+
+```csharp
+var package = new Package();
+package.Read("path/to/pak01_dir.vpk");
+
+switch (package.SignatureType)
+{
+    case ESignatureType.Unknown:
+        Console.WriteLine("Signature type not determined");
+        break;
+    case ESignatureType.FullFile:
+        Console.WriteLine("Using legacy full-file signature");
+        break;
+    case ESignatureType.OnlyFileChecksum:
+        Console.WriteLine("Using RSA-4096 checksum signature");
+        break;
+}
+```
+
+### Validating Signatures
+
+The signature type is used internally by the `IsSignatureValid` method to determine the verification approach:
+
+```csharp
+var package = new Package();
+package.Read("path/to/pak01_dir.vpk");
+
+// Verify the RSA signature
+if (package.IsSignatureValid())
+{
+    Console.WriteLine("Signature is valid!");
+}
+else
+{
+    Console.WriteLine("Signature validation failed!");
+}
+```
+
+## Implementation Details
+
+### FullFile (Legacy)
+
+When `SignatureType` is `FullFile`:
+- The signature is computed over the entire file content up to the signature section
+- Uses RSA with SHA256 and PKCS1 padding
+- More computationally expensive for large files
+
+### OnlyFileChecksum (Modern)
+
+When `SignatureType` is `OnlyFileChecksum`:
+- The signature is computed over the MD5 hash of the file (SHA256(MD5(file)))
+- More efficient as it only needs to hash the file once
+- Uses RSA-4096 with SHA256 and PKCS1 padding
+- The MD5 hash is stored in the `WholeFileChecksum` property
+
+### Unknown
+
+When `SignatureType` is `Unknown`:
+- The signature type has not been determined yet
+- Usually indicates the file is still being parsed or doesn't have signature information
+
+## See Also
+
+- [Package.IsSignatureValid](/api/package#issignaturevalid) - Method that uses signature type for verification
+- [Package.SignatureType](/api/package#signaturetype) - Property containing the signature type
+- [Package.Signature](/api/package#signature) - Property containing the RSA signature bytes
+- [Package.PublicKey](/api/package#publickey) - Property containing the public key for verification

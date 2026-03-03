@@ -1,0 +1,294 @@
+---
+title: Creating VPK Files
+description: Learn how to create and modify VPK packages
+---
+
+This guide covers creating new VPK packages, adding and removing files, and writing them to disk.
+
+## Creating a New Package
+
+To create a new VPK package, instantiate a `Package` object and add files:
+
+```csharp
+using var package = new Package();
+
+// Add files
+package.AddFile("path/to/file.txt", File.ReadAllBytes("file.txt"));
+package.AddFile("models/example.vmdl", File.ReadAllBytes("example.vmdl"));
+
+// Write the package
+package.Write("pak01_dir.vpk");
+```
+
+## Adding Files
+
+The `AddFile` method takes a file path and byte array:
+
+```csharp
+using var package = new Package();
+
+// Add a file from disk
+var fileData = File.ReadAllBytes("myfile.txt");
+var entry = package.AddFile("path/to/myfile.txt", fileData);
+
+Console.WriteLine($"Added: {entry.GetFullPath()}");
+Console.WriteLine($"CRC32: 0x{entry.CRC32:X}");
+```
+
+<Note>
+  `AddFile` returns the created `PackageEntry`, allowing you to inspect the entry metadata immediately.
+</Note>
+
+### Path Handling
+
+The library automatically handles path separators:
+
+```csharp
+// Both of these work correctly
+package.AddFile("path/to/file.txt", data);      // Unix-style
+package.AddFile("path\\to\\file.txt", data);     // Windows-style
+
+// Both create the same entry
+```
+
+### Files Without Extensions
+
+VPK uses a space character for files without extensions:
+
+```csharp
+// File without extension
+package.AddFile("README", data);
+
+// The TypeName will be " " (space)
+var entry = package.FindEntry("README");
+Console.WriteLine($"Extension: '{entry.TypeName}'");  // " "
+```
+
+### Files in Root Directory
+
+Files in the root directory have their `DirectoryName` set to a space:
+
+```csharp
+// File in root
+package.AddFile("rootfile.txt", data);
+
+var entry = package.FindEntry("rootfile.txt");
+Console.WriteLine($"Directory: '{entry.DirectoryName}'");  // " "
+```
+
+## Removing Files
+
+Use `RemoveFile` to remove an entry from the package:
+
+```csharp
+using var package = new Package();
+
+// Add a file
+var entry = package.AddFile("path/to/file.txt", data);
+
+// Later, remove it
+if (package.RemoveFile(entry))
+{
+    Console.WriteLine("File removed successfully");
+}
+else
+{
+    Console.WriteLine("File not found");
+}
+```
+
+You can also find and remove in one step:
+
+```csharp
+var entry = package.FindEntry("path/to/file.txt");
+if (entry != null)
+{
+    package.RemoveFile(entry);
+}
+```
+
+<Warning>
+  `AddFile` does not check for duplicates. Make sure to remove existing entries before adding files with the same path.
+</Warning>
+
+## Writing Packages
+
+There are two ways to write a package:
+
+<Steps>
+  <Step title="Write to a file path">
+    The simplest method:
+
+    ```csharp
+    package.Write("pak01_dir.vpk");
+    ```
+
+    This creates a new file or overwrites an existing one.
+  </Step>
+
+  <Step title="Write to a Stream">
+    For more control, write to a stream:
+
+    ```csharp
+    using var stream = new FileStream("pak01_dir.vpk", 
+        FileMode.Create, FileAccess.ReadWrite);
+    package.Write(stream);
+    ```
+
+    <Note>
+      The stream must be seekable and readable for hash calculation.
+    </Note>
+  </Step>
+</Steps>
+
+## VPK File Format
+
+When you write a package, the library creates a Version 2 VPK with the following structure:
+
+1. **Header** (28 bytes)
+   - Magic number: `0x55AA1234`
+   - Version: `2`
+   - Tree size
+   - File data section size
+   - Archive MD5 section size (0)
+   - Other MD5 section size (48)
+   - Signature section size (0)
+
+2. **Directory Tree**
+   - File paths organized by extension, directory, and filename
+   - Entry metadata (CRC32, archive index, offset, length)
+
+3. **File Data Section**
+   - Actual file contents
+   - All files concatenated sequentially
+
+4. **Verification Section**
+   - MD5 hash of the directory tree
+   - MD5 hash of archive checksums (empty)
+   - MD5 hash of entire file
+
+## How Files Are Stored
+
+The library currently stores all file data as "preload data" (SmallData) in the directory file:
+
+```csharp
+var entry = package.AddFile("myfile.txt", data);
+
+Console.WriteLine(entry.SmallData.Length);  // Same as data.Length
+Console.WriteLine(entry.Length);            // 0 (not in separate data file)
+Console.WriteLine(entry.ArchiveIndex);      // 0x7FFF (stored in _dir.vpk)
+```
+
+This creates a single-file VPK rather than a multi-part package.
+
+## Modifying Existing Packages
+
+You can read a package, modify it, and write it back:
+
+```csharp
+using var package = new Package();
+
+// Read existing package
+package.Read("pak01_dir.vpk");
+
+// Add new files
+package.AddFile("new/file.txt", File.ReadAllBytes("file.txt"));
+
+// Remove old files
+var oldFile = package.FindEntry("old/file.txt");
+if (oldFile != null)
+{
+    package.RemoveFile(oldFile);
+}
+
+// Write to a new location
+package.Write("pak01_modified_dir.vpk");
+```
+
+<Warning>
+  Writing back packages that were opened with `IsDirVPK = true` is currently unsupported. You'll get an `InvalidOperationException`.
+</Warning>
+
+```csharp
+package.Read("pak01_dir.vpk");
+
+if (package.IsDirVPK)
+{
+    throw new InvalidOperationException(
+        "Cannot write back multi-part VPK packages");
+}
+```
+
+## Size Limitations
+
+The library enforces a 2 GiB size limit for single-file packages:
+
+```csharp
+try
+{
+    // Adding many large files...
+    package.Write("large.vpk");
+}
+catch (InvalidOperationException ex)
+{
+    Console.WriteLine(ex.Message);
+    // "Package contents exceed 2GiB, and splitting packages 
+    //  is currently unsupported."
+}
+```
+
+## CRC32 Calculation
+
+CRC32 checksums are automatically calculated when adding files:
+
+```csharp
+var data = File.ReadAllBytes("myfile.txt");
+var entry = package.AddFile("myfile.txt", data);
+
+// CRC32 is automatically calculated
+Console.WriteLine($"CRC32: 0x{entry.CRC32:X}");
+```
+
+The checksum is stored in the package and can be verified later with `VerifyFileChecksums()`.
+
+## Complete Example
+
+Here's a complete example that creates a VPK from a directory:
+
+```csharp
+using SteamDatabase.ValvePak;
+
+using var package = new Package();
+
+// Recursively add all files from a directory
+var sourceDir = "content";
+foreach (var filePath in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+{
+    // Get relative path
+    var relativePath = Path.GetRelativePath(sourceDir, filePath);
+    
+    // Normalize path separators
+    relativePath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
+    
+    // Read file and add to package
+    var fileData = File.ReadAllBytes(filePath);
+    var entry = package.AddFile(relativePath, fileData);
+    
+    Console.WriteLine($"Added: {entry.GetFullPath()} ({entry.TotalLength} bytes)");
+}
+
+// Write the package
+package.Write("content_dir.vpk");
+Console.WriteLine("Package created successfully");
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Reading VPK Files" icon="book-open" href="/guides/reading-vpk">
+    Learn how to open and read VPK packages
+  </Card>
+  <Card title="Verification" icon="shield-check" href="/guides/verification">
+    Verify package integrity with checksums and signatures
+  </Card>
+</CardGroup>
