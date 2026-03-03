@@ -1,0 +1,91 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "ValvePak",
+  "projectDescription": "A .NET library for reading and extracting VPK (Valve Pak) files, the uncompressed archive format used to package game content in Source and Source 2 engine games.",
+  "theme": "aspen",
+  "primaryColor": "#FF6B35",
+  "lightColor": "#FFA500",
+  "darkColor": "#CC4125",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "Core Guides",
+            "pages": [
+              "guides/reading-vpk",
+              "guides/extracting-files",
+              "guides/creating-vpk",
+              "guides/verification"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/optimization",
+              "advanced/memory-mapped-access",
+              "advanced/custom-buffers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Classes",
+            "pages": [
+              "api/package",
+              "api/package-entry"
+            ]
+          },
+          {
+            "group": "Hash & Verification",
+            "pages": [
+              "api/chunk-hash-fraction",
+              "api/hash-type",
+              "api/signature-type"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Read and parse VPK v1 and v2 archives",
+    "Extract individual files or entire archives",
+    "Create new VPK packages programmatically",
+    "Verify MD5, Blake3, and CRC32 checksums",
+    "Validate RSA signatures",
+    "Memory-mapped file access for performance",
+    "Binary search optimization for fast lookups",
+    "Support for split archive files (_dir.vpk)"
+  ],
+  "publicApiSurface": [
+    "Package.Read(string)",
+    "Package.Read(Stream)",
+    "Package.ReadEntry(PackageEntry, out byte[])",
+    "Package.FindEntry(string)",
+    "Package.Write(string)",
+    "Package.AddFile(string, byte[])",
+    "Package.RemoveFile(PackageEntry)",
+    "Package.VerifyHashes()",
+    "Package.VerifyChunkHashes()",
+    "Package.VerifyFileChecksums()",
+    "Package.IsSignatureValid()",
+    "Package.GetMemoryMappedStreamIfPossible(PackageEntry)",
+    "Package.OptimizeEntriesForBinarySearch()",
+    "PackageEntry.GetFileName()",
+    "PackageEntry.GetFullPath()",
+    "PackageEntry.TotalLength",
+    "PackageEntry.CRC32",
+    "ChunkHashFraction",
+    "EHashType",
+    "ESignatureType"
+  ]
+}
