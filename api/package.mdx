@@ -183,6 +183,27 @@ if (entry != null)
 }
 ```
 
+### SetFileName
+
+Sets the file name for the package. This is required when reading from a stream or when creating a new package.
+
+<ParamField path="fileName" type="string" required>
+  The file name (with or without the .vpk extension).
+</ParamField>
+
+<Note>
+  If the file name ends with "_dir.vpk", the library will automatically set `IsDirVPK` to true.
+  The .vpk extension and _dir suffix are automatically handled.
+</Note>
+
+```csharp
+var package = new Package();
+package.SetFileName("pak01_dir.vpk");
+
+// The library strips extensions and _dir suffix internally
+// So "pak01_dir.vpk" becomes "pak01" as the base name
+```
+
 ### Write
 
 Writes the package to a file.
@@ -201,6 +222,31 @@ var package = new Package();
 package.SetFileName("output.vpk");
 package.AddFile("test.txt", System.Text.Encoding.UTF8.GetBytes("Hello VPK!"));
 package.Write("output.vpk");
+```
+
+### Write (Stream)
+
+Writes the package to a stream.
+
+<ParamField path="stream" type="Stream" required>
+  The stream to write the VPK package to. Must be seekable and readable.
+</ParamField>
+
+<Warning>
+  Writing back to a `_dir.vpk` (directory VPK with multiple chunks) is currently unsupported.
+  The stream must support both seeking and reading operations.
+</Warning>
+
+```csharp
+var package = new Package();
+package.SetFileName("output.vpk");
+package.AddFile("test.txt", System.Text.Encoding.UTF8.GetBytes("Hello VPK!"));
+
+using var stream = new MemoryStream();
+package.Write(stream);
+
+// Stream now contains the VPK data
+byte[] vpkData = stream.ToArray();
 ```
 
 ### AddFile
@@ -378,6 +424,35 @@ if (package.IsSignatureValid())
 else
 {
     Console.WriteLine("Package signature is invalid or missing");
+}
+```
+
+### Dispose
+
+Releases resources used by the package, including file streams and memory-mapped files.
+
+<Note>
+  The `Package` class implements `IDisposable`. Always dispose of package instances when you're done with them, preferably using a `using` statement.
+</Note>
+
+```csharp
+// Using statement automatically disposes
+using (var package = new Package())
+{
+    package.Read("pak01_dir.vpk");
+    // Work with the package
+} // Disposed here
+
+// Or manually dispose
+var package2 = new Package();
+try
+{
+    package2.Read("pak01_dir.vpk");
+    // Work with the package
+}
+finally
+{
+    package2.Dispose();
 }
 ```
 
